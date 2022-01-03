@@ -2,8 +2,9 @@ package io.gitlab.mhammons.slinc.components
 
 import scala.quoted.*
 import scala.util.chaining.*
-import jdk.incubator.foreign.{FunctionDescriptor, CLinker}
-import scala.language.experimental
+import jdk.incubator.foreign.{FunctionDescriptor, CLinker, SegmentAllocator}
+import io.gitlab.mhammons.polymorphics.MethodHandleHandler
+import java.lang.invoke.MethodHandle
 
 object MethodHandleMacros:
    def methodType[Ret: Type](args: List[Type[?]])(using Quotes) =
@@ -11,8 +12,7 @@ object MethodHandleMacros:
 
       val methodTypes = args.map { case '[p] =>
          Expr
-            .summon[NativeInfo[p]]
-            .getOrElse(missingLayout[p])
+            .summonOrError[NativeInfo[p]]
             .pipe(exp => '{ $exp.carrierType })
       }
       Type.of[Ret] match
@@ -45,8 +45,7 @@ object MethodHandleMacros:
          paramTypes
             .map { case '[p] =>
                Expr
-                  .summon[NativeInfo[p]]
-                  .getOrElse(missingLayout[p])
+                  .summonOrError[NativeInfo[p]]
                   .pipe(exp => '{ $exp.layout })
             }
             .pipe(Varargs.apply)
@@ -67,22 +66,73 @@ object MethodHandleMacros:
    def downcall[Ret: Type](
        name: String,
        params: List[Type[?]]
-   )(using Quotes) =
+   )(using Quotes): Expr[Allocatee[MethodHandle]] =
       val functionD = functionDescriptor[Ret](params)
       val methodT = methodType[Ret](params)
 
-      val symbolLookup = Expr.summon[SymbolLookup].getOrElse(???)
+      val symbolLookup = Expr.summonOrError[SymbolLookup]
       val nameExpr = Expr(name)
 
-      val idx = Expr(UniversalNativeCache.getBindingIndex(name))
       '{
-         UniversalNativeCache.addMethodHandle(
-           $idx,
-           Linker.linker.downcallHandle(
-             $symbolLookup.lookup($nameExpr),
-             $methodT,
-             $functionD
-           )
+         Linker.linker.downcallHandle(
+           $symbolLookup.lookup($nameExpr),
+           segAlloc,
+           $methodT,
+           $functionD
          )
       }
+
+   def call[Ret: Type](mh: Expr[MethodHandle], ps: List[Expr[Any]])(using
+       Quotes
+   ): Expr[Immigratee[Ret, Allocatee[Ret]]] =
+      import quotes.reflect.*
+
+      def callFn(mh: Expr[MethodHandle], args: List[Expr[Any]]) = Apply(
+        Ident(
+          TermRef(TypeRepr.of[MethodHandleHandler.type], s"call${ps.size}")
+        ),
+        mh.asTerm :: ps.map(_.asTerm)
+      ).asExprOf[Any]
+
+      '{
+         immigrator[Ret](${ callFn(mh, ps) })
+      }
+
+   def binding[Ret: Type](name: String, ps: List[(Expr[Any], Type[?])])(using
+       Quotes
+   ) =
+      import quotes.reflect.*
+      val methodHandle =
+         downcall[Ret](
+           name,
+           ps.map { case (_, '[a]) =>
+              Type.of[a]
+           }
+         )
+
+      '{
+         given Immigrator[Ret] = ${
+            Expr.summonOrError[Immigrator[Ret]]
+         }
+         given SegmentAllocator = localAllocator
+         try {
+            val mh = $methodHandle
+            ${
+               call(
+                 '{ mh },
+                 ps.map { case (a, '[b]) =>
+                    '{
+                       ${ Expr.summonOrError[Emigrator[b]] }(${
+                          a.asExprOf[b]
+                       })
+                    }
+                 }
+               )
+            }
+         } finally {
+            reset()
+         }
+
+      }
+
 end MethodHandleMacros

@@ -6,22 +6,29 @@ import jdk.incubator.foreign.{
    MemorySegment,
    MemoryLayout,
    MemoryAddress,
+   MemoryAccess,
    CLinker,
-   ResourceScope
-}, MemoryLayout.PathElement, CLinker.C_POINTER
+   ResourceScope,
+   GroupLayout,
+   ValueLayout
+}, MemoryLayout.PathElement
 import components.{
    Deserializer,
    Serializer,
-   TypeInfo,
    NativeInfo,
    summonOrError,
-   ProductInfo,
-   PrimitiveInfo,
-   PtrInfo,
-   Deserializable,
-   SerializeFrom
+   deserializerOf,
+   infoOf,
+   Informee,
+   Deserializee,
+   Serializee,
+   serializerOf,
+   Emigrator,
+   Allocatee
 }
 import scala.reflect.ClassTag
+import scala.jdk.CollectionConverters.*
+import io.gitlab.mhammons.slinc.components.Immigrator
 
 class Ptr[A](
     memoryAddress: MemoryAddress,
@@ -29,15 +36,22 @@ class Ptr[A](
     map: => Map[String, Any] = Map.empty
 ) extends Selectable:
    lazy val myMap = map
-   def `unary_!` : Deserializable[A] =
-      Deserializer.from(
+   def `unary_!` : Deserializee[A, A] =
+      deref
+
+   def deref: Deserializee[A, A] =
+      deserializerOf[A].from(
         memoryAddress,
         offset
       )
-   def `unary_!_=`(a: A): SerializeFrom[A] =
-      SerializeFrom(a, memoryAddress, offset)
 
-   def +(plus: Long)(using layoutOf: NativeInfo[A]) = Ptr[A](
+   def `unary_!_=`(a: A): Serializee[A, Unit] =
+      deref = a
+
+   def deref_=(a: A): Serializee[A, Unit] =
+      serializerOf[A].into(a, memoryAddress, offset)
+
+   def +(plus: Long)(using layoutOf: NativeInfo[A]) = new Ptr[A](
      memoryAddress.addOffset(layoutOf.layout.byteSize * plus),
      offset,
      map
@@ -50,14 +64,16 @@ class Ptr[A](
       var i = 0
       val arr = Array.ofDim[A](size)
       while i < size do
-         arr(i) =
-            Deserializer.from(memoryAddress.addOffset(i * elemSize), offset)
+         arr(i) = deserializerOf[A].from(
+           memoryAddress.addOffset(i * elemSize),
+           offset
+         )
          i += 1
       arr
 
    def rescope(using ResourceScope) =
       if memoryAddress.scope == ResourceScope.globalScope then
-         Ptr[A](
+         new Ptr[A](
            memoryAddress.asSegment(1, summon[ResourceScope]).address,
            offset,
            map
@@ -68,25 +84,49 @@ class Ptr[A](
          )
 
 object Ptr:
+   def apply[A](
+       memoryAddress: MemoryAddress,
+       offset: Long
+   ): Informee[A, Ptr[A]] =
+      genPtr(memoryAddress, offset, infoOf[A].layout).asInstanceOf[Ptr[A]]
+
+   private def genPtr(
+       memoryAddress: MemoryAddress,
+       offset: Long,
+       memoryLayout: MemoryLayout
+   ): Ptr[Any] =
+      memoryLayout match
+         case gl: GroupLayout =>
+            new Ptr(
+              memoryAddress,
+              offset,
+              gl.memberLayouts.asScala
+                 .map(ml =>
+                    ml.name.get.pipe(n =>
+                       n -> genPtr(
+                         memoryAddress,
+                         gl.byteOffset(PathElement.groupElement(n)),
+                         ml
+                       )
+                    )
+                 )
+                 .toMap
+            )
+         case vl: ValueLayout => new Ptr(memoryAddress, offset, Map.empty)
+
    class Null[A: NativeInfo: ClassTag] extends Ptr[A](MemoryAddress.NULL, 0):
-      override def `unary_!` =
+      override def deref =
          throw NullPointerException("SLinC Null Ptr attempted dereference")
-      override def `unary_!_=`(a: A) =
+      override def deref_=(a: A) =
          throw NullPointerException("SLinC Null Ptr attempted value update")
       override def asMemoryAddress = MemoryAddress.NULL
    extension [A](a: Ptr[A])
       transparent inline def partial = ${ selectableImpl[A]('a) }
 
-   transparent inline def PartialCapable[A](p: Ptr[A]) = ${
-      selectableImpl[A]('p)
-   }
-
    def selectableImpl[A: Type](nptr: Expr[Ptr[A]])(using Quotes) =
-      import quotes.reflect.*
       val typeInfo = TypeInfo[A]
       produceDualRefinement(typeInfo) match
          case '[refinement] =>
-            report.warning(Type.show[refinement])
             val layout = Expr.summonOrError[NativeInfo[A]]
             '{
                val l = $layout.layout
@@ -111,47 +151,39 @@ object Ptr:
                .asType
          case PrimitiveInfo(name, '[a]) =>
             Type.of[Ptr[a]]
-         case PtrInfo(_, _, _) => ???
-
-   def getNPtrs(
-       typeInfo: TypeInfo,
-       segment: Expr[MemoryAddress],
-       layout: Expr[MemoryLayout],
-       path: Seq[Expr[PathElement]]
-   )(using Quotes): Expr[Ptr[?]] =
-      val (modifiedPath, membersMap, typ) = typeInfo match
-         case ProductInfo(name, members, typ) =>
-            val modifiedPath =
-               if name.isEmpty then path
-               else
-                  path :+ '{
-                     PathElement.groupElement(${ Expr(name) })
-                  }
-            val membersMap = members
-               .map(m =>
-                  getNPtrs(m, segment, layout, modifiedPath).pipe(exp =>
-                     '{ ${ Expr(m.name) } -> $exp }
-                  )
-               )
-               .pipe(Expr.ofSeq)
-               .pipe(expr => '{ $expr.toMap })
-
-            (modifiedPath, membersMap, typ)
-         case PrimitiveInfo(name, typ) =>
-            val modifiedPath = path :+ '{
-               PathElement.groupElement(${ Expr(name) })
-            }
-            (modifiedPath, '{ Map.empty }, typ)
-
-      typ match
-         case '[a] =>
-            '{
-               Ptr[a](
-                 $segment,
-                 $layout.byteOffset(${ Expr.ofSeq(modifiedPath) }*),
-                 $membersMap.toMap
-               )
+         case PtrInfo(name, typeInfo, '[a]) =>
+            produceDualRefinement(typeInfo).pipe { case '[b] =>
+               Type.of[Ptr[b]]
             }
 
-   given gen[A]: NativeInfo[Ptr[A]] =
-      summon[NativeInfo[String]].asInstanceOf[NativeInfo[Ptr[A]]]
+   given gen[A <: Ptr[?]]: NativeInfo[A] =
+      summon[NativeInfo[String]].asInstanceOf[NativeInfo[A]]
+
+   given [A](using NativeInfo[A]): Emigrator[Ptr[A]] with
+      def apply(a: Ptr[A]): Allocatee[Any] = a.asMemoryAddress
+
+   given [A]: Informee[A, Immigrator[Ptr[A]]] = a =>
+      Ptr[A](a.asInstanceOf[MemoryAddress], 0)
+
+   given [A, P <: Ptr[A]](using NativeInfo[A]): Deserializer[P] with
+      def from(
+          memoryAddress: MemoryAddress,
+          offset: Long
+      ): P =
+         val address = MemoryAccess.getAddressAtOffset(
+           MemorySegment.globalNativeSegment,
+           memoryAddress.toRawLongValue + offset
+         )
+
+         Ptr[A](address, 0).asInstanceOf[P]
+
+   private val ptrSerializer = new Serializer[Ptr[Any]]:
+      def into(ptr: Ptr[Any], memoryAddress: MemoryAddress, offset: Long) =
+         MemoryAccess.setAddressAtOffset(
+           MemorySegment.globalNativeSegment,
+           memoryAddress.toRawLongValue + offset,
+           ptr.asMemoryAddress
+         )
+
+   given [A]: Serializer[Ptr[A]] =
+      ptrSerializer.asInstanceOf[Serializer[Ptr[A]]]

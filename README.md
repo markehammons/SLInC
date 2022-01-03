@@ -4,6 +4,8 @@ S     Lin     C
 Scala Link to C
 ```
 
+Please note that the main location for this repository is [gitlab](https://gitlab.com/mhammons/slinc). Please look there for the issue tracker and other things.
+
 SLinC is a Scala 3 library that allows users to interoperate with C code via Java 17's [foreign api incubator](https://docs.oracle.com/en/java/javase/17/docs/api/jdk.incubator.foreign/jdk/incubator/foreign/package-summary.html).
 
 It's designed to make use of Scala's type system and macros to handle most of the work of making bindings to C from Scala.
@@ -110,6 +112,85 @@ Please note that this dereferencing operation involves copying data to and from 
 !ptr = div_t(5,6) //updating ptr normally requires copying in an entire new div_n
 !ptr.partial.quot = 5 //only copies 5 from the jvm, and only writes it to the memory for quot
 ```
+
+## Non-standard lib bindings
+
+The bind macro will search in the standard lib by default for methods to bind to. If you want to bind to a lib you wrote, or one on your system, create a singleton object that extends the Library trait. An example follows:
+
+```c
+struct a_t
+{
+   int a;
+   int b;
+};
+
+struct b_t
+{
+   int c;
+   struct a_t d;
+};
+
+struct c_t
+{
+   int a[3];
+   float b[3];
+};
+
+struct b_t slinc_test_modify(struct b_t b)
+{
+   b.d.a += 6;
+   return b;
+}
+
+struct c_t slinc_test_addone(struct c_t c)
+{
+   for (int i = 0; i < 3; i++)
+   {
+      c.a[i] += 1;
+      c.b[i] += 1;
+   }
+
+   return c;
+}
+
+int *slinc_test_getstaticarr()
+{
+
+   int *ret = malloc(sizeof(int) * 3);
+   ret[0] = 1;
+   ret[1] = 2;
+   ret[2] = 3;
+
+   return ret;
+}
+
+int slinc_two_structs(struct a_t a, struct a_t b)
+{
+   return a.a * b.a;
+}
+```
+
+```scala
+object Testlib extends Library(Location.Local("slinc/test/native/libtest.so")):
+   case class a_t(a: Int, b: Int) derives Struct
+   case class b_t(c: Int, d: a_t) derives Struct
+
+   case class c_t(a: StaticArray[Int, 3], b: StaticArray[Float, 3])
+       derives Struct
+
+   def slinc_test_modify(b_t: b_t): b_t = bind
+   def slinc_test_addone(c_t: c_t): c_t = bind
+   def slinc_test_getstaticarr(): Ptr[Int] = bind
+   def slinc_two_structs(a: a_t, b: a_t): Int = bind
+```
+
+The library trait takes a `Location`: 
+
+* Local: a location that is relative to your running program
+* Absolute: a location that is an absolute path to a library on your system
+* System: the name of a library in the standard path of your system
+
+
 
 ## Unsupported at present
 

@@ -1,4 +1,4 @@
-package io.gitlab.mhammons.slinc_benches
+package io.gitlab.mhammons.slinc.benches
 
 def repeat[A](fn: => A, times: Int) =
    var count = times

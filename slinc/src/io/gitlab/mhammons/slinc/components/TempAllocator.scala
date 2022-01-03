@@ -7,48 +7,53 @@ import jdk.incubator.foreign.{
    ResourceScope,
    MemoryAddress
 }
-import java.lang.ref.Reference
-import scala.collection.mutable.Seq
 
-private val allocationLocal = ThreadLocal[MemorySegment]()
+private val allocator = ThreadLocal.withInitial(() => TempAllocator())
 
-private def reallocateSts(bytesNeeded: Long, old: MemorySegment) =
-   val size = powersOf2.dropWhile(_ < bytesNeeded).head
-   val address = CLinker
-      .allocateMemory(size)
-      .asSegment(size, ResourceScope.globalScope)
-   if old != null then
-      address.copyFrom(old)
-      CLinker.freeMemory(old.address)
-   allocationLocal.set(address)
-   address
+sealed class TempAllocator:
+   private val powersOf2 = LazyList.iterate(1L)(_ << 1).iterator
+   private var currentSegment =
+      val next = powersOf2.next
+      CLinker.allocateMemory(next).asSegment(next, ResourceScope.globalScope)
+   private var offset = 0L
+   private var rs: () => Unit = null
 
-private val powersOf2 = LazyList.iterate(1)(_ << 1)
+   private def addToRs(memoryAddress: MemoryAddress) =
+      if rs != null then
+         val curRs = rs
+         rs = () => { curRs(); CLinker.freeMemory(memoryAddress) }
+      else rs = () => CLinker.freeMemory(memoryAddress)
 
-class TempAllocator:
-   val powerIter = powersOf2.iterator
-   var currentSegment = allocationLocal.get
-   var currentOffset = 0L
-   var toFree = Seq.empty[MemoryAddress]
-
-   val localAllocator: SegmentAllocator = (bytesNeeded, alignment) =>
-      val totalBytesNeeded = currentOffset + bytesNeeded
-      if currentSegment == null || currentSegment.byteSize < totalBytesNeeded then
+   def allocate(bytes: Long): MemorySegment =
+      if bytes + offset > currentSegment.byteSize then
          println(
-           s"reallocating to fit $bytesNeeded cause offset is at $currentOffset"
+           s"reallocating to fit cause total bytes needed is at ${offset + bytes} and current segment has size of ${currentSegment.byteSize}"
          )
-         if currentSegment != null then toFree :+= currentSegment.address
-         currentOffset = 0L
-         var nextSize = powerIter.next
-         while nextSize < bytesNeeded do nextSize = powerIter.next
-         currentSegment = CLinker
-            .allocateMemory(nextSize)
-            .asSegment(nextSize, ResourceScope.globalScope)
+         addToRs(currentSegment.address)
+         offset = 0L
+         var nextSize = powersOf2.next
+         while nextSize < bytes do nextSize = powersOf2.next
+         println(nextSize)
+         currentSegment =
+            MemorySegment.allocateNative(nextSize, ResourceScope.globalScope)
 
-      val result = currentSegment.asSlice(currentOffset, bytesNeeded)
-      currentOffset += bytesNeeded
-      result
+         allocate(bytes)
+      else
+         val oldOffset = offset
+         offset += bytes
+         currentSegment.asSlice(oldOffset, bytes)
 
-   def close() =
-      toFree.foreach(CLinker.freeMemory)
-      allocationLocal.set(currentSegment)
+   def reset() =
+      offset = 0L
+      if rs != null then
+         rs()
+         rs = null
+
+private def reset() =
+   allocator.get.reset()
+
+private val localAllocator: SegmentAllocator = (bytesNeeded, alignment) =>
+   allocator.get.allocate(bytesNeeded)
+
+private val powersOf2 = LazyList.iterate(1L)(_ << 1)
+private val nextSizeLocal = ThreadLocal.withInitial(() => powersOf2.iterator)

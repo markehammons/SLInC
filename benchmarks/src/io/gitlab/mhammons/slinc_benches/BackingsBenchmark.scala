@@ -4,8 +4,6 @@ import org.openjdk.jmh.annotations.*
 import java.util.concurrent.TimeUnit
 import scala.util.Random
 import io.gitlab.mhammons.slinc.Struct
-import io.gitlab.mhammons.slinc.components.MinimalPerfectHashtable
-import io.gitlab.mhammons.slinc.components.MinimalFastPerfectHashtable
 import jdk.incubator.foreign.ResourceScope
 import jdk.incubator.foreign.CLinker.C_INT
 import jdk.incubator.foreign.SegmentAllocator

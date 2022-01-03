@@ -1,12 +1,12 @@
 package io.gitlab.mhammons.slinc
 
-class TestlibSuite extends munit.FunSuite {
+class TestlibSuite extends munit.FunSuite:
    test("modify") {
       val a = Testlib.a_t(3, 4)
       val b = Testlib.b_t(5, a)
 
       assertEquals(
-        scope(Testlib.slinc_test_modify(b)),
+        Testlib.slinc_test_modify(b),
         b.copy(d = a.copy(a = 9))
       )
    }
@@ -14,7 +14,7 @@ class TestlibSuite extends munit.FunSuite {
    test("addone") {
       val c = Testlib.c_t(StaticArray[Int, 3], StaticArray[Float, 3])
 
-      val result = scope(Testlib.slinc_test_addone(c))
+      val result = Testlib.slinc_test_addone(c)
 
       c.a.underlying
          .zip(result.a.underlying)
@@ -36,7 +36,7 @@ class TestlibSuite extends munit.FunSuite {
 
    test("pass in as static arr") {
       scope {
-         Testlib.slinc_test_getstaticarr1(Array(1, 2, 3).serialize)
+         Testlib.slinc_test_passstaticarr(Array(1, 2, 3).serialize)
       }
    }
 
@@ -48,4 +48,3 @@ class TestlibSuite extends munit.FunSuite {
 
       assertEquals(res, 4)
    }
-}

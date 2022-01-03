@@ -5,7 +5,6 @@ import jdk.incubator.foreign.{
    MemoryAddress,
    CLinker
 }
-import scala.jdk.OptionConverters.*
 
 trait SymbolLookup:
    def lookup(name: String): MemoryAddress
@@ -15,9 +14,8 @@ object SymbolLookup:
       val underlying = CLinker.systemLookup
       def lookup(name: String) = underlying
          .lookup(name)
-         .toScala
-         .getOrElse(
-           throw new Exception(
-             s"Couldn't find symbol $name in the C standard library"
-           )
+         .orElseThrow(() =>
+            throw new Exception(
+              s"Couldn't find symbol $name in the C standard library"
+            )
          )

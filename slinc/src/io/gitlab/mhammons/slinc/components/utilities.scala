@@ -19,18 +19,6 @@ val clookup: String => MemoryAddress =
          .orElse(SymbolLookup.loaderLookup.lookup(s).toScala)
          .getOrElse(throw new Exception(s"Couldn't find $s anywhere"))
 
-def missingLayout[A: Type](using Quotes) =
-   import quotes.reflect.report
-   report.errorAndAbort(
-     s"No layout for type ${Type.show[A]} was found. Please define one if you need this type."
-   )
-
-def missingTemplate[A: Type](using Quotes) =
-   import quotes.reflect.report
-   report.errorAndAbort(
-     s"No template for type ${Type.show[A]} was found. Please define one if you need this type"
-   )
-
 extension (expr: Expr.type)
    def summonOrError[A: Type](using Quotes): Expr[A] =
       import quotes.reflect.{report}
@@ -40,6 +28,6 @@ extension (expr: Expr.type)
            report.errorAndAbort(s"Could not summon ${Type.show[A]} in macro")
          )
 
-type Allocates[A] = SegmentAllocator ?=> A
+type Allocatee[A] = SegmentAllocator ?=> A
 
-val segAlloc: Allocates[SegmentAllocator] = summon[SegmentAllocator]
+val segAlloc: Allocatee[SegmentAllocator] = summon[SegmentAllocator]

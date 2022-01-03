@@ -1,26 +1,25 @@
-package io.gitlab.mhammons.slinc.components
+package io.gitlab.mhammons.slinc
 
 import scala.quoted.*
 import scala.util.chaining.*
-import io.gitlab.mhammons.slinc.Ptr
-import io.gitlab.mhammons.slinc.StaticArray
 
-sealed trait TypeInfo:
+private sealed trait TypeInfo:
    def rename(name: String): TypeInfo
    val name: String
-case class ProductInfo(
+private case class ProductInfo(
     name: String,
     caseMembers: Seq[TypeInfo],
     myType: Type[?]
 ) extends TypeInfo:
    def rename(name: String) = copy(name = name)
-case class PrimitiveInfo(name: String, myType: Type[?]) extends TypeInfo:
+private case class PrimitiveInfo(name: String, myType: Type[?])
+    extends TypeInfo:
    def rename(name: String) = copy(name = name)
-case class PtrInfo(name: String, underlying: TypeInfo, myType: Type[?])
+private case class PtrInfo(name: String, underlying: TypeInfo, myType: Type[?])
     extends TypeInfo:
    def rename(name: String) = copy(name = name)
 
-object TypeInfo:
+private object TypeInfo:
    def apply[A: Type](using Quotes): TypeInfo =
       import quotes.reflect.*
 

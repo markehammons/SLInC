@@ -1,20 +1,10 @@
 package io.gitlab.mhammons.slinc.components
 
-import scala.quoted.*
-import scala.util.chaining.*
+import jdk.incubator.foreign.{MemoryLayout, CLinker, MemoryAddress},
+CLinker.{C_INT, C_FLOAT, C_DOUBLE, C_LONG, C_POINTER, C_SHORT, C_CHAR}
 
-import io.gitlab.mhammons.slinc.Ptr
-
-import jdk.incubator.foreign.{
-   MemoryLayout,
-   CLinker,
-   MemoryAddress,
-   MemorySegment
-}, CLinker.{C_INT, C_FLOAT, C_DOUBLE, C_LONG, C_POINTER, C_SHORT, C_CHAR}
-
-type HasInfo[A] = NativeInfo[A] ?=> A
-
-type PtrHasInfo[A] = NativeInfo[A] ?=> A
+type Informee[A, B] = NativeInfo[A] ?=> B
+def infoOf[A]: Informee[A, NativeInfo[A]] = summon[NativeInfo[A]]
 trait NativeInfo[A]:
    val layout: MemoryLayout
    val carrierType: Class[?]

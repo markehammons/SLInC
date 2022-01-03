@@ -33,9 +33,9 @@ struct c_t slinc_test_addone(struct c_t c)
    return c;
 }
 
-void slinc_test_getstaticarr1(int res[3])
+void slinc_test_passstaticarr(int res[3])
 {
-   return res;
+   return;
 }
 
 int *slinc_test_getstaticarr()

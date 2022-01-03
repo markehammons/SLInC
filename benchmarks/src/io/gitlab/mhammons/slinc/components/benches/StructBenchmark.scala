@@ -1,4 +1,4 @@
-package io.gitlab.mhammons.slinc_benches
+package io.gitlab.mhammons.slinc.components.benches
 
 import scala.util.Random
 import org.openjdk.jmh.annotations.*
@@ -6,6 +6,12 @@ import java.util.concurrent.TimeUnit
 import java.util.Arrays
 import scala.annotation.tailrec
 import io.gitlab.mhammons.slinc.*
+import io.gitlab.mhammons.slinc.benches.repeatInl
+import io.gitlab.mhammons.slinc.components.{
+   TempAllocator,
+   localAllocator,
+   reset
+}
 import jdk.incubator.foreign.{SegmentAllocator, ResourceScope}
 
 @State(Scope.Thread)
@@ -57,14 +63,16 @@ class StructBenchmark:
       rs.close
 
    @Benchmark
-   def allocate2Simple =
-      given SegmentAllocator = segAlloc
-      repeatInl(divRo.serialize, reps)
+   def allocateSimple =
+      scope {
+         repeatInl(divRo.serialize, reps)
+      }
 
    @Benchmark
-   def allocateSimple =
-      given SegmentAllocator = memAlloc
-      repeatInl(divRo.serialize, reps)
+   def allocateTemporary =
+      given SegmentAllocator = localAllocator
+      try repeatInl(summon[SegmentAllocator].allocate(8, 4), reps)
+      finally reset()
 
    // @Benchmark
    // def allocate2Nested =

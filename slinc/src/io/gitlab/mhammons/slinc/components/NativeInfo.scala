@@ -15,7 +15,7 @@ object NativeInfo:
 
    def apply[A](using NativeInfo[A]) = summon[NativeInfo[A]]
    given NativeInfo[Int] with
-      val layout = C_INT
+      val layout: MemoryLayout = C_INT
       val carrierType = classOf[Int]
 
    given NativeInfo[Float] with
@@ -27,7 +27,7 @@ object NativeInfo:
       val carrierType = classOf[Double]
 
    given NativeInfo[Long] with
-      val layout = C_LONG
+      val layout: MemoryLayout = C_LONG
       val carrierType = classOf[Long]
 
    given NativeInfo[String] with

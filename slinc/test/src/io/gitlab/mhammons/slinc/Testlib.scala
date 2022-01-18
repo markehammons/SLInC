@@ -2,6 +2,9 @@ package io.gitlab.mhammons.slinc
 
 import jdk.incubator.foreign.SegmentAllocator
 
+object BuildInfo {
+   val libtest = ""
+}
 object Testlib extends Library(Location.Absolute(BuildInfo.libtest)):
    case class a_t(a: Int, b: Int) derives Struct
    case class b_t(c: Int, d: a_t) derives Struct

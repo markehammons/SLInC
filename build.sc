@@ -42,7 +42,7 @@ object slinc
      "--enable-native-access",
      "ALL-UNNAMED"
    )
-   object test extends Tests with TestModule.Munit with BuildInfo {
+   object test extends Tests with TestModule.Munit {
       def scalacOptions = Seq(
         "-deprecation",
         "-Wunused:all",

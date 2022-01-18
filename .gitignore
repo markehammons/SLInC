@@ -8,3 +8,4 @@ out
 slinc/src/io/gitlab/mhammons/slinc/test.worksheet.sc
 *.bench
 .bsp
+**/target

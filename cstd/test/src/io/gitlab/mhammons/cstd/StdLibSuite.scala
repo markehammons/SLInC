@@ -7,6 +7,16 @@ class StdLibSuite extends munit.FunSuite:
    import StdLib.*
    import CLocale.*
 
+   val fn =
+      (a1: Ptr[Any], b: Ptr[Any]) =>
+         Math.abs(3)
+         val aRef = !a1.castTo[Int]
+         val bRef = !b.castTo[Int]
+         if aRef > bRef then 1
+         else if aRef == bRef then 0
+         else -1
+   val fnPtr = globalScope { fn.encode }
+
    test("abs") {
       assertEquals(
         abs(5),
@@ -53,26 +63,43 @@ class StdLibSuite extends munit.FunSuite:
    }
 
    test("qsort") {
-      val base = Array.fill(8)(Random.nextInt.toLong).toSeq
+      val base = Array.fill(400)(Math.abs(Random.nextInt)).toSeq
 
       val sortedBase = scope {
          val copy = base.encode.castTo[Any]
 
-         val fn =
-            (a1: Ptr[Any], b: Ptr[Any]) =>
-               if !a1.castTo[Long] > !b.castTo[Long] then 1
-               else if !a1.castTo[Long] == !b.castTo[Long] then 0
-               else -1
-         val fnPtr = fn.encode
          qsort(
            copy.castTo[Any],
-           SizeT.fromShortOrFail(base.size.toShort),
-           sizeOf[Long],
+           SizeT.fromIntOrFail(base.size),
+           sizeOf[Int],
            fnPtr
          )
 
-         copy.castTo[Long].toArray(base.size)
+         copy.castTo[Int].toArray(base.size)
       }
+
+      assertEquals(sortedBase.toSet, base.toSet)
+
+      assertEquals(sortedBase.toSeq, base.sorted)
+   }
+
+   test("qsort big") {
+      val base = Array.fill(1000000)(Math.abs(Random.nextInt)).toSeq
+
+      val sortedBase = scope {
+         val copy = base.encode.castTo[Any]
+
+         qsort(
+           copy.castTo[Any],
+           SizeT.fromIntOrFail(base.size),
+           sizeOf[Int],
+           fnPtr
+         )
+
+         copy.castTo[Int].toArray(base.size)
+      }
+
+      assertEquals(sortedBase.toSet, base.toSet)
 
       assertEquals(sortedBase.toSeq, base.sorted)
    }

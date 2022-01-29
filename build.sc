@@ -48,7 +48,9 @@ object slinc
      "--add-modules",
      "jdk.incubator.foreign",
      "--enable-native-access",
-     "ALL-UNNAMED"
+     "ALL-UNNAMED",
+     "-XX:+UnlockDiagnosticVMOptions",
+     "-XX:+LogCompilation"
    )
 
    def docSources = T.sources {
@@ -134,7 +136,9 @@ object cstd extends ScalaModule with benchmark.BenchmarksModule {
         "--add-modules",
         "jdk.incubator.foreign",
         "--enable-native-access",
-        "ALL-UNNAMED"
+        "ALL-UNNAMED",
+        "-XX:+UnlockDiagnosticVMOptions",
+        "-XX:+LogCompilation"
       )
 
       def ivyDeps = Agg(ivy"org.scalameta::munit::${v.munit}")

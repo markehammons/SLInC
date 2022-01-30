@@ -138,7 +138,8 @@ object cstd extends ScalaModule with benchmark.BenchmarksModule {
         "--enable-native-access",
         "ALL-UNNAMED",
         "-XX:+UnlockDiagnosticVMOptions",
-        "-XX:+LogCompilation"
+        "-XX:-LogCompilation",
+        "-XX:-UseCompiler"
       )
 
       def ivyDeps = Agg(ivy"org.scalameta::munit::${v.munit}")

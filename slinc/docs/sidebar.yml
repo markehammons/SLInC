@@ -9,3 +9,8 @@ sidebar:
       - page: docs/usage/other-helpful-functions
       - page: docs/usage/supported-platforms
       - page: docs/usage/unsupported-features
+  - title: benchmarks
+    subsection:
+      - title: v0.1.1
+        subsection:
+          - page: docs/benchmarks/v0-1-1/self-improvement

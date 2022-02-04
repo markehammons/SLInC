@@ -1,0 +1,22 @@
+---
+layout: doc-page
+---
+
+<script src=/scripts/benchmarkGraph.js></script>
+{{content}}
+
+{% for benchmark in page.benchmarks %}
+{% assign benchAttr = benchmark | split: "," %}
+{% assign benchName = benchAttr[0] %}
+{% assign benchBench = benchAttr[1] %}
+{% assign benchVersion = benchAttr[2] %}
+{% assign benchScale = benchAttr[3] %}
+{% assign benchKeys = benchAttr[4] | split: " " %}
+{% assign benchScaleType = benchAttr[5] %}
+
+
+<h2>{{ benchName }}</h2>
+
+<canvas id="{{benchName}}Bench"></canvas>
+<script>inVersionGraph("{{benchBench}}", "{{benchVersion}}", "{{benchScale}}", ["{{ benchKeys | join: '", "'}}"], "{{ benchScaleType }}", document.getElementById('{{benchName}}Bench'));</script>
+{% endfor %}

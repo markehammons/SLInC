@@ -80,3 +80,34 @@ function comparisonGraph(benchName, version1, version2, labels, scaleType, canva
    );
 };
 
+function inVersionGraph(benchName, version, dataLabel, labels, scaleType, canvas) {
+   var data = [];
+
+   loadBenchData(data, labels, benchName, version);
+
+   const config = {
+      type: "bar",
+      data: {
+         labels: labels,
+         datasets: [
+            {
+               data: data,
+               backgroundColor: "red",
+               label: dataLabel
+            }
+         ]
+      }, options: {
+         scales: {
+            myScale: {
+               type: scaleType,
+               position: 'left',
+            }
+         }
+      }
+   };
+
+   const myChart = new Chart(
+      canvas, config
+   );
+};
+

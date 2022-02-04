@@ -11,6 +11,10 @@ sidebar:
       - page: docs/usage/unsupported-features
   - title: benchmarks
     subsection:
+      - title: v0.1.0
+        subsection:
+          - page: docs/benchmarks/v0-1-0/performance
       - title: v0.1.1
         subsection:
+          - page: docs/benchmarks/v0-1-1/performance
           - page: docs/benchmarks/v0-1-1/self-improvement

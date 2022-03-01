@@ -1,6 +1,7 @@
 package io.gitlab.mhammons.slinc.components
 
-import jdk.incubator.foreign.{MemoryAddress, FunctionDescriptor, CLinker}
+import ffi.{Address, ForeignSymbol, Scope, Descriptor, Linker, Allocator, CInt, CLong, CFloat, CShort, CChar, CDouble}
+import io.gitlab.mhammons.slinc.components.{Linker => CLinker}
 import scala.compiletime.erasedValue
 import io.gitlab.mhammons.polymorphics.VoidHelper
 import java.lang.invoke.{MethodType => MT, MethodHandles}
@@ -9,48 +10,56 @@ import scala.util.chaining.*
 import scala.reflect.ClassTag
 import java.lang.invoke.MethodHandle
 
-/** Indicates how to turn JVM types into [[jdk.incubator.foreign.MemoryAddress]]
+/** Indicates how to turn JVM types into [[io.gitlab.mhammons.slincffi.FFI#Address]]
   * @tparam A
   *   The type to be turned into a MemoryAddresses
   */
 trait Exporter[A]:
-   def exportValue(a: A): Scopee[Allocatee[MemoryAddress]]
+   def exportValue(a: A)(using Scope, Allocator): Address
 
 type Exportee[A, B] = Exporter[A] ?=> B
 
-def exportValue[A](a: A): Scopee[Allocatee[Exportee[A, MemoryAddress]]] =
+def exportValue[A](a: A): Scopee[Allocatee[Exportee[A, Address]]] =
    summon[Exporter[A]].exportValue(a)
 
 object Exporter:
    private inline def allocatingSerialize[A](
        a: A
-   ): Allocatee[Informee[A, Writee[A, MemoryAddress]]] =
+   ): Allocatee[Informee[A, Writee[A, Address]]] =
+
       val address = allocate[A].address
       write(a, address, 0)
       address
 
    def derive[A]: Informee[A, Writee[A, Exporter[A]]] =
       new Exporter[A]:
-         def exportValue(a: A) = allocatingSerialize(a)
+         def exportValue(a: A)(using Scope, Allocator) = allocatingSerialize(a)
 
-   given Exporter[Int] = derive[Int]
-   given Exporter[Long] = derive[Long]
-   given Exporter[Float] = derive[Float]
+   given Exporter[Int] with 
+      def exportValue(a: Int)(using Scope, Allocator) = segAlloc.allocate(CInt, a)
+   given Exporter[Long] with 
+      def exportValue(a: Long)(using Scope, Allocator) = segAlloc.allocate(CLong, a)
+   given Exporter[Float] with 
+      def exportValue(a: Float)(using Scope, Allocator) = segAlloc.allocate(CFloat, a)
 
-   given Exporter[Double] = derive[Double]
+   given Exporter[Double] with 
+      def exportValue(a: Double)(using Scope, Allocator) = segAlloc.allocate(CDouble, a)
 
-   given Exporter[Short] = derive[Short]
+   given Exporter[Short] with 
+      def exportValue(a: Short)(using Scope, Allocator) = segAlloc.allocate(CShort, a)
 
-   given Exporter[Boolean] = derive[Boolean]
+   given Exporter[Boolean] with
+      def exportValue(a: Boolean)(using Scope, Allocator) = segAlloc.allocate(CChar, if a then 1.toByte else 0.toByte)
 
    // given Exporter[Char] with
    //    def exportValue(a: Char) = allocatingSerialize(a)
 
-   given Exporter[Byte] = derive[Byte]
+   given Exporter[Byte] with 
+      def exportValue(a: Byte)(using Scope, Allocator) = segAlloc.allocate(CChar, a)
 
 
    given [A](using Writer[Array[A]], NativeInfo[A]): Exporter[Array[A]] with
-      def exportValue(a: Array[A]) =
+      def exportValue(a: Array[A])(using Scope, Allocator) =
          val address =
             segAlloc.allocate(layoutOf[A].byteSize * a.length).address
          write[Array[A]](a, address, 0)
@@ -71,12 +80,14 @@ object Exporter:
          given Fn[A] = ${ Expr.summonOrError[Fn[A]] }
          new Exporter[A]:
             val typeName = ${ Expr(TypeRepr.of[A].typeSymbol.name) }
-            val methodType = MethodHandleMacros.methodTypeForFn[A]
 
             val functionDescriptor =
                MethodHandleMacros.functionDescriptorForFn[A]
 
-            def exportValue(a: A): Scopee[Allocatee[MemoryAddress]] = ${
+            val methodType = 
+               Linker.downcallType(functionDescriptor)
+
+            def exportValue(a: A)(using Scope, Allocator): Address = ${
                val aTerm = 'a.asTerm
                val (nTypeRepr, inputTypes, retType) = TypeRepr.of[A] match
                   case AppliedType(oTypeRepr, args) =>
@@ -135,11 +146,11 @@ object Exporter:
                      .bindTo($wrappedLambda)
                      .asType(methodType)
 
-                  Linker.linker.upcallStub(
+                  CLinker.linker.upcallStub(
                     lambdaMh,
                     functionDescriptor,
                     currentScope
-                  )
+                  ).address
                }
             }
       }

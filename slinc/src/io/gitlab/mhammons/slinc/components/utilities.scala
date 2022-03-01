@@ -2,23 +2,15 @@ package io.gitlab.mhammons.slinc.components
 
 import scala.quoted.*
 
-import jdk.incubator.foreign.{
-   CLinker,
-   SymbolLookup,
-   MemoryAddress,
-   MemorySegment,
-   SegmentAllocator,
-   ResourceScope
-}
+import ffi.{Allocator, Address, Segment, ForeignSymbol, Lookup, Scope}
 import scala.jdk.OptionConverters.*
 import scala.compiletime.ops.boolean.!
 
-val clookup: String => MemoryAddress =
+val clookup: String => ForeignSymbol =
    (s: String) =>
-      CLinker.systemLookup
+      Lookup.systemLookup
          .lookup(s)
-         .toScala
-         .orElse(SymbolLookup.loaderLookup.lookup(s).toScala)
+         .orElse(Lookup.loaderLookup.lookup(s))
          .getOrElse(throw new Exception(s"Couldn't find $s anywhere"))
 
 extension (expr: Expr.type)
@@ -33,17 +25,17 @@ extension (expr: Expr.type)
            )
          )
 
-type Allocatee[A] = SegmentAllocator ?=> A
+type Allocatee[A] = Allocator ?=> A
 
-val segAlloc: Allocatee[SegmentAllocator] = summon[SegmentAllocator]
+val segAlloc: Allocatee[Allocator] = summon[Allocator]
 
-def allocate[A]: Allocatee[Informee[A, MemorySegment]] = allocate(1)
-def allocate[A](num: Long): Allocatee[Informee[A, MemorySegment]] =
-   segAlloc.allocate(layoutOf[A].byteSize * num)
+def allocate[A]: Allocatee[Informee[A, Segment]] = allocate(1)
+def allocate[A](num: Long): Allocatee[Informee[A, Segment]] =
+   segAlloc.allocateSegment(layoutOf[A].byteSize * num)
 
-type Scopee[A] = ResourceScope ?=> A
+type Scopee[A] = Scope ?=> A
 
-val currentScope: Scopee[ResourceScope] = summon[ResourceScope]
+val currentScope: Scopee[Scope] = summon[Scope]
 
 extension [A](t: Type[A])(using Quotes)
    def widen =

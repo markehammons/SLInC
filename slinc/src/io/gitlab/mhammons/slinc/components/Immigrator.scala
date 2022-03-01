@@ -1,6 +1,6 @@
 package io.gitlab.mhammons.slinc.components
 
-import jdk.incubator.foreign.{CLinker, MemoryAddress}
+import ffi.Address
 import scala.annotation.targetName
 
 type Immigratee[A, B] = Immigrator[A] ?=> B
@@ -25,7 +25,7 @@ object Immigrator:
    given Immigrator[Float] = _.asInstanceOf[Float]
 
    given Immigrator[String] = o =>
-      CLinker.toJavaString(o.asInstanceOf[MemoryAddress])
+      o.asInstanceOf[Address].getUtf8String(0)
 
    given Immigrator[Long] = _.asInstanceOf[Long]
 

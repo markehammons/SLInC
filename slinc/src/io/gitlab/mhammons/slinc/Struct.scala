@@ -1,12 +1,7 @@
 package io.gitlab.mhammons.slinc
 
 import scala.quoted.*
-import jdk.incubator.foreign.{
-   SegmentAllocator,
-   MemoryAddress,
-   MemorySegment,
-   MemoryLayout
-}, MemoryLayout.PathElement
+import components.ffi.{Layout, Address, Segment, Scope, Allocator, Addressable}
 import io.gitlab.mhammons.slinc.components.{
    NativeInfo,
    Writer,
@@ -42,17 +37,16 @@ object Struct:
       derivedImpl[A]
    }
 
-   private def derivedImpl[A <: Product: Type](using Quotes) =
+   private def derivedImpl[A <: Product: Type](using Quotes, Type[Layout.Path], Type[Layout.Group]) =
       import quotes.reflect.*
       val typeInfo = TypeInfo[A]
       '{
          // helps prevent recursion issues on Struct instantiation
          given l: NativeInfo[A] with
             val layout = ${ fromTypeInfo(typeInfo) }
-            val carrierType = classOf[MemorySegment]
 
          given s: Writer[A] with
-            def into(a: A, memoryAddress: MemoryAddress, offset: Long): Unit =
+            def into(a: A, memoryAddress: Address, offset: Long): Unit =
                ${
                   serializerFromTypeInfo(
                     'a,
@@ -65,43 +59,42 @@ object Struct:
                }
 
          given d: Reader[A] with
-            def from(memoryAddress: MemoryAddress, offset: Long) =
+            def from(memoryAddress: Address, offset: Long) =
                ${
-                  deserializerFromTypeInfo(
-                    'memoryAddress,
+                  deserializerFromTypeInfo[A](
+                    '{memoryAddress.address},
                     Nil,
                     typeInfo
                   )
                }.asInstanceOf[A]
 
          new Struct[A]:
-            val carrierType = classOf[MemorySegment]
             val layout = l.layout
 
-            def into(a: A, memoryAddress: MemoryAddress, offset: Long): Unit =
+            def into(a: A, memoryAddress: Address, offset: Long): Unit =
                s.into(a, memoryAddress, offset)
 
-            def from(memoryAddress: MemoryAddress, offset: Long) =
+            def from(memoryAddress: Address, offset: Long) =
                d.from(memoryAddress, offset)
 
             def apply(a: A): Allocatee[Any] =
-               val segment = segAlloc.allocate(layout)
+               val segment = segAlloc.allocateSegment(layout)
                into(a, segment.address, 0)
                segment
 
-            def exportValue(a: A) =
+            def exportValue(a: A)(using Scope, Allocator) =
                val segment = segAlloc.allocate(layout)
                into(a, segment.address, 0)
                segment.address
 
             def apply(a: Any) =
-               from(a.asInstanceOf[MemorySegment].address, 0)
+               from(a.asInstanceOf[Segment].address, 0)
 
       }
 
    private def fromTypeInfo(typeInfo: TypeInfo)(using
-       Quotes
-   ): Expr[MemoryLayout] =
+       Quotes, Type[Layout.Group]
+   ): Expr[Layout] =
       typeInfo match
          case PrimitiveInfo(name, '[a]) =>
             '{
@@ -117,23 +110,23 @@ object Struct:
             }
          case ProductInfo(name, members, _) =>
             '{
-               MemoryLayout
+               Layout
                   .structLayout(${
                      members.map(fromTypeInfo).pipe(Expr.ofSeq)
                   }*)
                   .withName(${ Expr(name) })
             }
 
-   private def deserializerFromTypeInfo[A: Type](
-       memorySegmentExpr: Expr[MemoryAddress],
-       path: Seq[Expr[PathElement]],
+   private def deserializerFromTypeInfo[A](
+       memorySegmentExpr: Expr[Address],
+       path: Seq[Expr[Layout.Path]],
        typeInfo: TypeInfo
-   )(using q: Quotes): Expr[Any] =
+   )(using q: Quotes, t: Type[A], u: Type[Layout.Path]): Expr[Any] =
       import quotes.reflect.*
       typeInfo match
          case PrimitiveInfo(name, '[a]) =>
             val updatedPath = Expr.ofSeq(path :+ '{
-               PathElement.groupElement(${ Expr(name) })
+               Layout.Path.groupElement(${ Expr(name) })
             })
             val info = Expr.summonOrError[NativeInfo[A]]
             '{
@@ -145,7 +138,7 @@ object Struct:
          case ProductInfo(name, members, '[a]) =>
             val updatedPath =
                if name.isEmpty then path
-               else path :+ '{ PathElement.groupElement(${ Expr(name) }) }
+               else path :+ '{ Layout.Path.groupElement(${ Expr(name) }) }
             Apply(
               Select(
                 New(TypeTree.of[a]),
@@ -162,7 +155,7 @@ object Struct:
                  .toList
             ).asExpr
          case PtrInfo(name, _, t) =>
-            deserializerFromTypeInfo(
+            deserializerFromTypeInfo[A](
               memorySegmentExpr,
               path,
               PrimitiveInfo(name, t)
@@ -170,12 +163,12 @@ object Struct:
 
    private def serializerFromTypeInfo(
        a: Expr[?],
-       memoryAddress: Expr[MemoryAddress],
+       memoryAddress: Expr[Address],
        offset: Expr[Long],
-       layout: Expr[MemoryLayout],
-       path: Seq[Expr[PathElement]],
+       layout: Expr[Layout],
+       path: Seq[Expr[Layout.Path]],
        typeInfo: TypeInfo
-   )(using Quotes): Expr[Unit] =
+   )(using Quotes, Type[Layout.Path]): Expr[Unit] =
       import quotes.reflect.*
       typeInfo match
          case PrimitiveInfo(name, '[a]) =>
@@ -185,7 +178,7 @@ object Struct:
                $to.into(
                  ${ a.asExprOf[a] },
                  $memoryAddress,
-                 $layout.byteOffset($pathExpr*) + $offset
+                 ${layout}.byteOffset($pathExpr*) + $offset
                )
             }
          case ProductInfo(name, members, '[a]) =>
@@ -194,7 +187,7 @@ object Struct:
                TypeRepr.of[a].typeSymbol.caseFields.map(s => s.name -> s).toMap
             val memberSelect = members.map { m =>
                val updatedPath = path :+ '{
-                  PathElement.groupElement(${ Expr(m.name) })
+                  Layout.Path.groupElement(${ Expr(m.name) })
                }
                Select(aTerm, aMembers(m.name)).asExpr.pipe(
                  serializerFromTypeInfo(

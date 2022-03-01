@@ -85,6 +85,6 @@ case object PlatformX64Linux
       SpeedTImpl[Platform#UInt32T],
       TcflagTImpl[Platform#UInt32T]
 
-val platform = (arch, os) match
+val platform: Platform = (arch, os) match
    case (Arch.X86_64, OS.Linux) => PlatformX64Linux
    case _ => throw new Error("Platform isn't supported...")

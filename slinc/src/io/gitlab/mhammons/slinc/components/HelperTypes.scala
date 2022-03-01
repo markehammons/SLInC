@@ -1,6 +1,6 @@
 package io.gitlab.mhammons.slinc.components
 
-import jdk.incubator.foreign.{CLinker, MemoryAddress}, CLinker.C_CHAR
+import ffi.CChar
 
 object HelperTypes:
    opaque type AsciiChar <: Char = Char
@@ -25,8 +25,7 @@ object HelperTypes:
       extension (ac: AsciiChar) def toChar = ac.toChar
 
       given NativeInfo[AsciiChar] with
-         val layout = C_CHAR
-         val carrierType = classOf[Byte]
+         val layout = CChar
 
       given Writer[AsciiChar] =
          writerOf[Byte].contramap[AsciiChar](_.toByte)

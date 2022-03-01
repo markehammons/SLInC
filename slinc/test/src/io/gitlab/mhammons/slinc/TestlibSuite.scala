@@ -2,6 +2,7 @@ package io.gitlab.mhammons.slinc
 
 class TestlibSuite extends munit.FunSuite:
    import Testlib.*
+
    test("modify") {
       val a = Testlib.a_t(3, 4)
       val b = Testlib.b_t(5, a)
@@ -28,7 +29,7 @@ class TestlibSuite extends munit.FunSuite:
    test("get static arr") {
 
       val result = scope {
-         Testlib.slinc_test_getstaticarr().rescope.mkArray(3)
+         Testlib.slinc_test_getstaticarr().mkArray(3)
       }
       assertEquals(result(0), 1)
       assertEquals(result(1), 2)
@@ -160,5 +161,5 @@ class TestlibSuite extends munit.FunSuite:
    }
 
    test("variadic function bindings") {
-      assertEquals(sum(5)(34, 2, 3, 4, 5), 34 + 2 + 3 + 4 + 5)
+      assertEquals(sum(5).apply(34, 2, 3, 4, 5), 34 + 2 + 3 + 4 + 5)
    }

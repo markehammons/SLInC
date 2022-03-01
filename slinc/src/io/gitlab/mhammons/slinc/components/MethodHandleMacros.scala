@@ -2,13 +2,13 @@ package io.gitlab.mhammons.slinc.components
 
 import scala.quoted.*
 import scala.util.chaining.*
-import jdk.incubator.foreign.{
-   FunctionDescriptor,
-   CLinker,
-   SegmentAllocator,
-   MemoryAddress,
-   MemoryLayout,
-   SymbolLookup => JSymbolLookup
+import ffi.{
+   Descriptor,
+   Allocator,
+   Address,
+   Layout,
+   Lookup,
+   ForeignSymbol
 }
 import io.gitlab.mhammons.polymorphics.{MethodHandleHandler, VoidHelper}
 import java.lang.invoke.MethodHandle
@@ -18,33 +18,14 @@ import cats.data.Validated
 import cats.implicits.*
 
 private[slinc] object MethodHandleMacros:
-   inline def methodTypeForFn[A](using Fn[A]) = ${
-      methodTypeForFnImpl[A]
-   }
-
-   private def methodTypeForFnImpl[A: Type](using q: Quotes): Expr[MethodType] =
-      import quotes.reflect.*
-
-      TypeRepr.of[A] match
-         case AppliedType(trepr, args)
-             if trepr.typeSymbol.name.startsWith("Function") =>
-            val types = args.map(_.asType)
-            val inputLayouts = types.init.map { case '[a] =>
-               '{ ${ Expr.summonOrError[NativeInfo[a]] }.carrierType }
-            }
-            val result = types.last.pipe { case '[r] =>
-               Expr.summon[NativeInfo[r]].map(ni => '{ $ni.carrierType })
-            }
-            methodType(result, inputLayouts)
-
-   inline def functionDescriptorForFn[A](using Fn[A]): FunctionDescriptor =
+   inline def functionDescriptorForFn[A](using Fn[A]): Descriptor =
       ${
          functionDescriptorForFnImpl[A]
       }
 
    private def functionDescriptorForFnImpl[A](using q: Quotes)(using
        Type[A]
-   ): Expr[FunctionDescriptor] =
+   ): Expr[Descriptor] =
       import quotes.reflect.*
 
       TypeRepr.of[A] match
@@ -57,122 +38,63 @@ private[slinc] object MethodHandleMacros:
                Expr.summon[NativeInfo[r]].map(e => '{ $e.layout })
             }
 
-            functionDescriptor(retType, inputs)
-
-   def methodType(
-       returnCarrierType: Option[Expr[Class[?]]],
-       carrierTypes: List[Expr[Class[?]]]
-   )(using Quotes) =
-      import java.lang.invoke.MethodType
-
-      returnCarrierType
-         .map { r =>
-            if carrierTypes.isEmpty then '{ MethodType.methodType($r) }
-            else
-               '{
-                  MethodType.methodType(
-                    $r,
-                    ${ carrierTypes.head },
-                    ${ Varargs(carrierTypes.tail) }*
-                  )
-               }
-         }
-         .getOrElse {
-            if carrierTypes.isEmpty then '{ VoidHelper.methodTypeV() }
-            else
-               '{
-                  VoidHelper.methodTypeV(
-                    ${ carrierTypes.head },
-                    ${ Varargs(carrierTypes.tail) }*
-                  )
-               }
-         }
+            functionDescriptor(retType, inputs)(Nil)
 
    private def functionDescriptor(
-       returnLayout: Option[Expr[MemoryLayout]],
-       paramLayouts: List[Expr[MemoryLayout]]
-   )(using Quotes): Expr[FunctionDescriptor] =
+       returnLayout: Option[Expr[Layout]],
+       paramLayouts: List[Expr[Layout]]
+   )(
+       vParamLayouts: List[Expr[Layout]]
+   )(using Quotes): Expr[Descriptor] =
       returnLayout
          .map { r =>
-            '{ FunctionDescriptor.of($r, ${ Varargs(paramLayouts) }*) }
+            '{
+               Descriptor
+                  .of($r, ${ Varargs(paramLayouts) }*)
+                  .asVariadic(${ Varargs(vParamLayouts) }*)
+            }
          }
-         .getOrElse('{ FunctionDescriptor.ofVoid(${ Varargs(paramLayouts) }*) })
+         .getOrElse('{
+            Descriptor
+               .ofVoid(${ Varargs(paramLayouts) }*)
+               .asVariadic(${ Varargs(vParamLayouts) }*)
+         })
 
    private def paramsToLayoutAndCarrier(params: List[Expr[Any]])(using
        Quotes
-   ): (List[Expr[MemoryLayout]], List[Expr[Class[?]]]) =
+   ): List[Expr[Layout]] =
       params
          .map(_.widen)
          .flatMap { case '{ $z: a } =>
             val a = Expr.summonOrError[NativeInfo[a]]
-            Seq('{ $a.layout } -> '{ $a.carrierType })
+            Seq('{ $a.layout })
          }
-         .unzip
-
-   private def dc[Ret](
-       addr: Expr[MemoryAddress],
-       params: List[Expr[Any]]
-   )(using Quotes, Type[Ret]): Expr[Allocatee[MethodHandle]] =
-      val (returnLayout, returnCarrierType) = Type.of[Ret] match
-         case '[Unit] => (None, None)
-         case '[r] =>
-            Expr
-               .summonOrError[NativeInfo[r]]
-               .pipe(exp =>
-                  Some('{ $exp.layout }) -> Some('{ $exp.carrierType })
-               )
-
-      val (layouts, carrierTypes) = paramsToLayoutAndCarrier(params)
-      val functionD = functionDescriptor(returnLayout, layouts)
-      val methodT = methodType(returnCarrierType, carrierTypes)
-
-      '{
-         Linker.linker.downcallHandle($addr, segAlloc, $methodT, $functionD)
-      }
 
    private def dc2(
-       addr: Expr[MemoryAddress],
+       addr: Expr[ForeignSymbol],
        paramInfo: List[Expr[NativeInfo[?]]],
+       vParamInfo: List[Expr[NativeInfo[?]]],
        returnInfo: Option[Expr[NativeInfo[?]]]
    )(using Quotes): Expr[MethodHandle] =
 
-      val (layouts, carrierTypes) =
-         paramInfo.map(i => '{ $i.layout } -> '{ $i.carrierType }).unzip
+      val layouts =
+         paramInfo.map(i => '{ $i.layout })
+
+      val vLayouts =
+         vParamInfo.map(i => '{ $i.layout })
       val functionD =
-         functionDescriptor(returnInfo.map(i => '{ $i.layout }), layouts)
-      val methodT =
-         methodType(returnInfo.map(i => '{ $i.carrierType }), carrierTypes)
+         functionDescriptor(returnInfo.map(i => '{ $i.layout }), layouts)(
+           vLayouts
+         )
 
       '{
          Linker.linker.downcallHandle(
            $addr,
-           localAllocator,
-           $methodT,
-           $functionD
+           $functionD,
+           localAllocator
          )
       }
 
-   def call[Ret: Type](
-       mh: Expr[MethodHandle],
-       ps: List[Expr[Any]]
-   )(using
-       Quotes
-   ): Expr[Ret] =
-      import quotes.reflect.*
-
-      def callFn(mh: Expr[MethodHandle], args: List[Expr[Any]]) = Apply(
-        Ident(
-          TermRef(TypeRepr.of[MethodHandleHandler.type], s"call${ps.size}")
-        ),
-        mh.asTerm +: ps.map(_.asTerm)
-      ).asExprOf[Any]
-
-      Expr.betaReduce('{
-         given Immigrator[Ret] = ${
-            Expr.summonOrError[Immigrator[Ret]]
-         }
-         immigrator[Ret](${ callFn(mh, ps) })
-      })
 
    def call2(mh: Expr[MethodHandle], ps: List[Expr[Any]])(using
        Quotes
@@ -184,7 +106,6 @@ private[slinc] object MethodHandleMacros:
         ),
         mh.asTerm +: ps.map(_.asTerm)
       ).asExprOf[Any]
-
 
    def vdAndRefFromExpr[A](expr: Expr[A], name: String)(using
        q: Quotes,
@@ -204,10 +125,11 @@ private[slinc] object MethodHandleMacros:
       vd -> ref
 
    def wrappedMH(
-       memoryAddress: Expr[MemoryAddress],
+       memoryAddress: Expr[ForeignSymbol],
        inputNames: List[Option[String]],
        inputTypes: List[Type[?]],
-       returnType: Type[?]
+       returnType: Type[?],
+       inputVariadicTypes: List[Type[?]] = Nil
    )(using q: Quotes): Validated[List[String], Expr[Any]] =
       import quotes.reflect.{MethodType => MT, *}
       case class MHState(
@@ -223,49 +145,52 @@ private[slinc] object MethodHandleMacros:
           mhRef: Ref
       )
 
+      val resolvedInputNames = inputNames.map(
+        _.map(s => s"parameter $s").getOrElse("variadic argument")
+      )
+      def summonOrInvalid[A](inputName: String)(using Type[A]) = Validated.fromOption(
+        Expr.summon[A],
+        List(s"Could not summon ${Type.show[A]} for $inputName. Is it defined?")
+      )
+
       val paramNames =
          LazyList.iterate('a')(a => (a + 1).toChar).map(_.toString)
 
       val inputNIs =
-         inputNames
+         resolvedInputNames
             .zip(inputTypes)
             .zip(paramNames.map(s => s"ni$s"))
-            .traverse { case ((maybeInputName, '[a]), name) =>
-               Validated
-                  .fromOption(
-                    Expr.summon[NativeInfo[a]],
-                    maybeInputName match
-                       case Some(inputName) =>
-                          List(
-                            s"Could not summon ${Type.show[NativeInfo[a]]} for parameter $inputName. Is it defined?"
-                          )
-                       case None =>
-                          List(
-                            s"Could not summon ${Type.show[NativeInfo[a]]} for variadic argument. Is it defined?"
-                          )
-                  )
+            .traverse { case ((inputName, '[a]), name) =>
+               summonOrInvalid[NativeInfo[a]](inputName)
                   .map(vdAndRefFromExpr(_, name))
             }
             .map(_.unzip)
 
-      val inputEmis = inputNames
+      val vInputNIs =
+         inputVariadicTypes.zipWithIndex
+            .zip(paramNames.map(n => s"vNi$n"))
+            .traverse { case (('[a], idx), name) =>
+               summonOrInvalid[NativeInfo[a]](idx.toString).map(
+                 vdAndRefFromExpr(_, name)
+               )
+            }
+            .map(_.unzip)
+
+      val inputEmis = resolvedInputNames
          .zip(inputTypes)
          .zip(paramNames.map(s => s"emi$s"))
-         .traverse { case ((maybeInputName, '[a]), name) =>
-            Validated
-               .fromOption(
-                 Expr.summon[Emigrator[a]],
-                 maybeInputName match
-                    case Some(inputName) =>
-                       List(
-                         s"Could not summon ${Type.show[Emigrator[a]]} for parameter $inputName. Is it defined?"
-                       )
-                    case None =>
-                       List(
-                         s"Could not summon ${Type.show[Emigrator[a]]} for variadic parameter. Is it defined?"
-                       )
-               )
+         .traverse { case ((inputName, '[a]), name) =>
+            summonOrInvalid[Emigrator[a]](inputName)
                .map(vdAndRefFromExpr(_, name))
+         }
+         .map(_.unzip)
+
+      val variadicEmis = inputVariadicTypes.zipWithIndex
+         .zip(paramNames.map(s => s"vEmi$s"))
+         .traverse { case (('[a], idx), name) =>
+            summonOrInvalid[Emigrator[a]](idx.toString).map(
+              vdAndRefFromExpr(_, name)
+            )
          }
          .map(_.unzip)
 
@@ -273,46 +198,34 @@ private[slinc] object MethodHandleMacros:
          case '[Unit] =>
             Validated.valid((Option.empty[ValDef], Option.empty[Ref]))
          case '[r] =>
-            Validated
-               .fromOption(
-                 Expr.summon[NativeInfo[r]],
-                 List(
-                   s"Could not summon ${Type.show[NativeInfo[r]]} for the binding return. Is it defined?"
-                 )
-               )
-               .map(
-                 vdAndRefFromExpr(_, "retNI")
-                    .pipe(t => (Some(t._1), Some(t._2)))
-               )
+            summonOrInvalid[NativeInfo[r]]("the binding return").map(
+              vdAndRefFromExpr(_, "retNI").pipe(t => (Some(t._1), Some(t._2)))
+            )
 
       val retImmi = returnType.match { case '[r] =>
-         Validated
-            .fromOption(
-              Expr.summon[Immigrator[r]],
-              List(
-                s"Could not summon ${Type.show[NativeInfo[r]]} for the binding return. Is it defined?"
-              )
-            )
-            .map(vdAndRefFromExpr(_, "retImmi"))
+         summonOrInvalid[Immigrator[r]]("the binding return").map(vdAndRefFromExpr(_, "retImmi"))
       }
 
       val state = inputNIs.andThen((inputVds, inputRefs) =>
+         vInputNIs.andThen((vInputVds, vInputRefs) => 
+            variadicEmis.andThen((vEmiVDs, vEmiRefs) => 
          inputEmis.andThen((emiVDs, emiRefs) =>
             retNI.andThen((retNIVd, retNIRef) =>
                retImmi.map { (immiVd, immiRef) =>
                   val (mhVd, mhRef) = vdAndRefFromExpr(
                     dc2(
-                      memoryAddress.asExprOf[MemoryAddress],
+                      memoryAddress.asExprOf[ForeignSymbol],
                       inputRefs.map(_.asExprOf[NativeInfo[?]]),
+                      vInputRefs.map(_.asExprOf[NativeInfo[?]]),
                       retNIRef.map(_.asExprOf[NativeInfo[?]])
                     ),
                     "mh"
                   )
                   MHState(
-                    inputVds,
-                    inputRefs,
-                    emiVDs,
-                    emiRefs,
+                    inputVds ++ vInputVds,
+                    inputRefs ++ vInputRefs,
+                    emiVDs ++ vEmiVDs,
+                    emiRefs ++ vEmiRefs,
                     retNIVd,
                     retNIRef,
                     immiVd,
@@ -323,13 +236,13 @@ private[slinc] object MethodHandleMacros:
                }
             )
          )
-      )
+      )))
 
       def lmb(s: MHState) =
          Lambda(
            Symbol.spliceOwner,
-           MT(paramNames.take(inputTypes.size).toList)(
-             _ => inputTypes.map { case '[a] => TypeRepr.of[a] },
+           MT(paramNames.take((inputTypes ++ inputVariadicTypes).size).toList)(
+             _ => (inputTypes ++ inputVariadicTypes).map { case '[a] => TypeRepr.of[a] },
              _ => returnType match { case '[r] => TypeRepr.of[r] }
            ),
            (owner, trees) =>
@@ -337,11 +250,11 @@ private[slinc] object MethodHandleMacros:
                  case '[r] =>
                     val retImmi = s.retImmiRef.asExprOf[Immigrator[r]]
                     val callExpr = '{
-                       given SegmentAllocator = localAllocator
+                       given Allocator = localAllocator
                        try ${
                           call2(
                             s.mhRef.asExprOf[MethodHandle],
-                            inputTypes.zip(trees.zip(s.inputEmiRefs)).map {
+                            (inputTypes ++ inputVariadicTypes).zip(trees.zip(s.inputEmiRefs)).map {
                                case ('[a], (t, emi)) =>
                                   '{
                                      ${ emi.asExprOf[Emigrator[a]] }(${
@@ -366,7 +279,7 @@ private[slinc] object MethodHandleMacros:
                 s.mhVd
               ),
            lmb(s)
-         ).asExpr
+         ).asExpr//.tap(_.show.tap(report.errorAndAbort))
       )
    end wrappedMH
 
@@ -374,7 +287,7 @@ private[slinc] object MethodHandleMacros:
        q: Quotes
    )(
        s: q.reflect.Symbol,
-       address: Expr[MemoryAddress]
+       address: Expr[ForeignSymbol]
    ): Validated[List[String], Expr[Any]] =
       import quotes.reflect.{MethodType => MT, *}
       val paramNames =

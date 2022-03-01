@@ -5,7 +5,7 @@ import scala.compiletime.ops.int.<
 import components.{Reader, readerOf, Writer, writerOf}
 import javax.naming.spi.DirStateFactory.Result
 import components.NativeInfo
-import jdk.incubator.foreign.{MemoryLayout, MemorySegment, MemoryAddress}
+import components.ffi.{Layout, Segment, Address, Addressable}
 
 type InboundsProof[Size <: Singleton & Int, Index <: Singleton & Int, Result] =
    (Index < Size =:= true) ?=> Result
@@ -81,8 +81,7 @@ object StaticArray:
    given [T: NativeInfo, Size <: Singleton & Int: ValueOf]
        : NativeInfo[StaticArray[T, Size]] with
       val layout =
-         MemoryLayout.sequenceLayout(valueOf[Size], NativeInfo[T].layout)
-      val carrierType = classOf[MemorySegment]
+         Layout.sequenceLayout(valueOf[Size], NativeInfo[T].layout)
 
    given [
        A: ClassTag: NativeInfo: Reader,
@@ -90,7 +89,7 @@ object StaticArray:
    ]: Reader[StaticArray[A, B]] =
       new Reader[StaticArray[A, B]]:
          def from(
-             memoryAddress: MemoryAddress,
+             memoryAddress: Address,
              offset: Long
          ): StaticArray[A, B] =
             val s = StaticArray[A, B]
@@ -113,7 +112,7 @@ object StaticArray:
       new Writer[StaticArray[A, B]]:
          def into(
              staticArray: StaticArray[A, B],
-             memoryAddress: MemoryAddress,
+             memoryAddress: Address,
              offset: Long
          ) =
             val nativeInfo = NativeInfo[A]

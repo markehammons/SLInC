@@ -1,11 +1,6 @@
 package io.gitlab.mhammons.slinc.components
 
-import jdk.incubator.foreign.{
-   MemoryLayout,
-   CLinker,
-   SegmentAllocator,
-   MemoryAddress
-}
+import ffi.{ForeignSymbol}
 import scala.quoted.*
 import scala.util.chaining.*
 import scala.util.NotGiven
@@ -15,7 +10,7 @@ import io.gitlab.mhammons.slinc.CLibrary
 trait VariadicMechanisms:
    trait VariadicCall
    protected def variadicHandlerC[R](
-       address: Expr[MemoryAddress],
+       address: Expr[ForeignSymbol],
        cache: Expr[LRU],
        params: List[Expr[Any]],
        args: Expr[Seq[Any]]
@@ -29,7 +24,7 @@ trait VariadicMechanisms:
             exprs
                .map(_.widen)
                .map { case '{ $v: a } =>
-                  '{ Variadic[a](${ v }) } -> Type.of[Variadic[a]]
+                  v -> Type.of[a]
                }
                .toList
                .unzip
@@ -38,8 +33,9 @@ trait VariadicMechanisms:
          .wrappedMH(
            address,
            (paramTypes ++ vTypes).map(_ => None),
-           paramTypes ++ vTypes,
-           Type.of[R]
+           paramTypes,
+           Type.of[R],
+           vTypes
          )
          .fold(e => report.errorAndAbort(e.mkString("\n")), identity)
 
@@ -66,15 +62,3 @@ trait VariadicMechanisms:
             ).asExprOf[R]
       }
    end variadicHandlerC
-
-case class Variadic[A](a: A) extends AnyVal
-object Variadic extends VariadicMechanisms:
-
-   given [A](using orig: NativeInfo[A]): NativeInfo[Variadic[A]] with {
-      val layout = CLinker.asVarArg(orig.layout)
-      val carrierType = orig.carrierType
-   }
-
-   given [A](using orig: Emigrator[A]): Emigrator[Variadic[A]] =
-      orig.contramap[Variadic[A]](_.a)
-end Variadic

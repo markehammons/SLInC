@@ -1,10 +1,10 @@
 package io.gitlab.mhammons.slinc
 
-import jdk.incubator.foreign.ResourceScope.globalScope
-import jdk.incubator.foreign.SegmentAllocator
+
+import components.ffi.{Allocator, Scope}
 
 class SegmentSuite extends munit.FunSuite {
-   given SegmentAllocator = SegmentAllocator.arenaAllocator(globalScope)
+   given Allocator = Allocator.arenaAllocator(Scope.globalScope)
    // val i = int.allocate
 
    // test("can allocate int") {

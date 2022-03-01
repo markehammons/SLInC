@@ -31,7 +31,7 @@ trait VariadicGen extends ScalaModule {
 
    def macroImplGen(arity: Int) = {
       val typeBlock = s"[${typeListForArity(arity)}]"
-      val args = (("address" -> "MemoryAddress") +: paramNames
+      val args = (("address" -> "ForeignSymbol") +: paramNames
          .zip(typeNames)
          .take(arity)
          .toList :+ ("args" -> "Seq[Any]"))
@@ -61,7 +61,7 @@ trait VariadicGen extends ScalaModule {
    def cachedMacroImplGen(arity: Int) = {
       val typeBlock = s"[${typeListForArity(arity)}]"
       val args =
-         (("address" -> "MemoryAddress") +: ("cache" -> "LRU") +: paramNames
+         (("address" -> "ForeignSymbol") +: ("cache" -> "LRU") +: paramNames
             .zip(typeNames)
             .take(arity)
             .toList :+ ("args" -> "Seq[Any]"))
@@ -91,7 +91,7 @@ trait VariadicGen extends ScalaModule {
    def variadicCallsGen(limit: Int) =
       s"""|package io.gitlab.mhammons.slinc.components
           |
-          |import jdk.incubator.foreign.MemoryAddress
+          |import ffi.ForeignSymbol
           |import scala.quoted.*
                                        |object VariadicCalls extends VariadicMechanisms {
                                        |${(for (arity <- 0 until limit)
@@ -105,13 +105,13 @@ trait VariadicGen extends ScalaModule {
    val paramNames =
       LazyList.iterate('a'.toInt, 24)(_ + 1).map(_.toChar.toString)
    def cachedConstructor(arity: Int) =
-      (("address" -> "MemoryAddress") +: ("cache" -> "LRU") +: paramNames
+      (("address" -> "ForeignSymbol") +: ("cache" -> "LRU") +: paramNames
          .zip(typeNames)
          .take(arity))
          .map { case (p, t) => s"$p:$t" }
          .mkString(",")
          .pipe(ps => s"($ps)")
-   def constructor(arity: Int) = (("address" -> "MemoryAddress") +: paramNames
+   def constructor(arity: Int) = (("address" -> "ForeignSymbol") +: paramNames
       .zip(typeNames)
       .take(arity))
       .map { case (p, t) => s"$p:$t" }

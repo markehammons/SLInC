@@ -6,7 +6,7 @@ import scala.reflect.ClassTag
 import scala.util.NotGiven
 import scala.annotation.implicitNotFound
 
-import jdk.incubator.foreign.{SegmentAllocator, ResourceScope, CLinker}
+import components.ffi.{Allocator, Scope, Linker}
 
 import io.gitlab.mhammons.slinc.components.{
    Allocatee,
@@ -52,22 +52,17 @@ import scala.annotation.targetName
   * @since v0.1.0
   */
 def scope[A](fn: Scopee[Allocatee[A]])(using NotGiven[A <:< Ptr[?]]) =
-   given resourceScope: ResourceScope = ResourceScope.newConfinedScope
-   given SegmentAllocator = SegmentAllocator.arenaAllocator(resourceScope)
+   given resourceScope: Scope = Scope.newConfinedScope()
+   given Allocator = Allocator.arenaAllocator(resourceScope)
    try {
       fn
    } finally {
-      resourceScope.close
+      resourceScope.close()
    }
 
 def globalScope[A](fn: Scopee[Allocatee[A]]) =
-   given resourceScope: ResourceScope = ResourceScope.globalScope
-   given SegmentAllocator = SegmentAllocator.arenaAllocator(resourceScope)
-   fn
-
-def lazyScope[A](fn: Scopee[Allocatee[A]]) =
-   given resourceScope: ResourceScope = ResourceScope.newImplicitScope
-   given SegmentAllocator = SegmentAllocator.arenaAllocator(resourceScope)
+   given resourceScope: Scope = Scope.globalScope
+   given Allocator = Allocator.arenaAllocator(resourceScope)
    fn
 
 extension [A](a: A)
@@ -92,7 +87,7 @@ def sizeOf[A]: Informee[A, SizeT] = SizeT.fromLongOrFail(layoutOf[A].byteSize)
 
 extension (s: String)
    def encode: Allocatee[Ptr[Byte]] =
-      Ptr[Byte](CLinker.toCString(s, segAlloc).address, 0)
+      Ptr[Byte](segAlloc.allocateUtf8String(s).address, 0)
 
 /** Allocates a blank block of native heap
   * @tparam A

@@ -1,7 +1,7 @@
 package io.gitlab.mhammons.slinc.components
 
-import jdk.incubator.foreign.CLinker
+import ffi.{Linker => CLinker}
 
 object Linker:
-  val linker = CLinker.getInstance
+  val linker = CLinker.systemCLinker()
 

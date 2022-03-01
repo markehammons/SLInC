@@ -1,7 +1,6 @@
 package io.gitlab.mhammons.slinc
 
 import scala.collection.immutable.ArraySeq
-import jdk.incubator.foreign.SegmentAllocator
 import java.io.File
 import java.nio.file.Paths
 
@@ -47,7 +46,7 @@ class StructSuite extends munit.FunSuite:
       val result = scope {
          !div_t(3, 4).encode.partial.quot
       }
-
+      
       assertEquals(3, result)
    }
 

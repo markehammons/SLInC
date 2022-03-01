@@ -3,16 +3,7 @@ package io.gitlab.mhammons.slinc
 import scala.quoted.*
 import scala.util.chaining.*
 import scala.compiletime.summonFrom
-import jdk.incubator.foreign.{
-   MemorySegment,
-   MemoryLayout,
-   MemoryAddress,
-   MemoryAccess,
-   CLinker,
-   ResourceScope,
-   GroupLayout,
-   ValueLayout
-}, MemoryLayout.PathElement
+import components.ffi.{Addressable, Address, Layout, Scope, Segment}
 import components.{
    Reader,
    Writer,
@@ -42,7 +33,7 @@ import io.gitlab.mhammons.slinc.components.Exporter
   *   Where the data [[A]] is relative to the pointer's address
   */
 class Ptr[A](
-    memoryAddress: MemoryAddress,
+    memoryAddress: Address,
     offset: Long,
     map: => Map[String, Any] = Map.empty
 ) extends Selectable:
@@ -80,7 +71,7 @@ class Ptr[A](
       deref = a
 
    def deref_=(a: A): Writee[A, Unit] =
-      writerOf[A].into(a, memoryAddress, offset)
+      writerOf[A].into(a, memoryAddress.asInstanceOf[Address], offset)
 
    /** Offsets this pointer by a number of elements of size A
      * @param num
@@ -89,7 +80,7 @@ class Ptr[A](
      *   A new, offset pointer
      */
    def +(num: Long)(using layoutOf: NativeInfo[A]) = new Ptr[A](
-     memoryAddress.addOffset(layoutOf.layout.byteSize * num),
+     memoryAddress.address.addOffset(layoutOf.layout.byteSize * num),
      offset,
      map
    )
@@ -102,7 +93,7 @@ class Ptr[A](
      */
    inline def castTo[B] =
       Ptr[B](memoryAddress, offset)
-   def asMemoryAddress = memoryAddress.addOffset(offset)
+   def asMemoryAddress = memoryAddress.address.addOffset(offset)
    def selectDynamic(key: String) = myMap(key)
 
    /** Transform this pointer into an array
@@ -126,21 +117,9 @@ class Ptr[A](
          i += 1
       arr
 
-   def rescope(using ResourceScope) =
-      if memoryAddress.scope == ResourceScope.globalScope then
-         new Ptr[A](
-           memoryAddress.asSegment(1, summon[ResourceScope]).address,
-           offset,
-           map
-         )
-      else
-         throw new IllegalStateException(
-           "This pointer already belongs to another scope, cannot be moved"
-         )
-
 object Ptr:
    inline def apply[A](
-       memoryAddress: MemoryAddress,
+       memoryAddress: Address,
        offset: Long
    ): Ptr[A] =
       summonFrom {
@@ -151,76 +130,70 @@ object Ptr:
       }
 
    private def genPtr(
-       memoryAddress: MemoryAddress,
+       memoryAddress: Address,
        offset: Long,
-       memoryLayout: MemoryLayout
+       memoryLayout: Layout
    ): Ptr[Any] =
       memoryLayout match
-         case gl: GroupLayout =>
+         case gl: Layout.Group =>
             new Ptr(
               memoryAddress,
               offset,
-              gl.memberLayouts.asScala
+              gl.memberLayouts
                  .map(ml =>
                     ml.name.get.pipe(n =>
                        n -> genPtr(
                          memoryAddress,
-                         gl.byteOffset(PathElement.groupElement(n)),
+                         gl.byteOffset(Layout.Path.groupElement(n)),
                          ml
                        )
                     )
                  )
                  .toMap
             )
-         case vl: ValueLayout => new Ptr(memoryAddress, offset, Map.empty)
+         case vl: Layout.Value => new Ptr(memoryAddress, offset, Map.empty)
+         case _ => new Ptr(memoryAddress, offset, Map.empty)
 
    /** Null pointer implementation
      */
-   class Null[A: NativeInfo: ClassTag] extends Ptr[A](MemoryAddress.NULL, 0):
+   class Null[A: NativeInfo: ClassTag] extends Ptr[A](Address.NULL, 0):
       override def deref =
          throw NullPointerException("SLinC Null Ptr attempted dereference")
       override def deref_=(a: A) =
          throw NullPointerException("SLinC Null Ptr attempted value update")
-      override def asMemoryAddress = MemoryAddress.NULL
+      override def asMemoryAddress = Address.NULL
 
    extension (a: Ptr[Byte])
       /** Transforms a Ptr[Byte] to a Scala String
         */
-      def mkString = CLinker.toJavaString(a.asMemoryAddress)
+      def mkString = a.asMemoryAddress.getUtf8String(0)
       def toByteArray(size: Int) =
          val addr = a.asMemoryAddress
-         addr.asSegment(layoutOf[Byte].byteSize * size, addr.scope).toByteArray
+         Segment.ofAddress(addr, layoutOf[Byte].byteSize * size, Scope.globalScope).toByteArray
 
    extension (a: Ptr[Short])
       def mkArray(size: Int) =
          val addr = a.asMemoryAddress
-         addr
-            .asSegment(layoutOf[Short].byteSize * size, addr.scope)
-            .toShortArray
-
+         Segment.ofAddress(addr, layoutOf[Short].byteSize * size, Scope.globalScope).toShortArray
    extension (a: Ptr[Int])
       def mkArray(size: Int) =
          val addr = a.asMemoryAddress
-         addr.asSegment(layoutOf[Int].byteSize * size, addr.scope).toIntArray
+         Segment.ofAddress(addr, layoutOf[Int].byteSize * size, Scope.globalScope).toIntArray
 
    extension (a: Ptr[Long])
       def mkArray(size: Int) =
          val addr = a.asMemoryAddress
-         addr.asSegment(layoutOf[Long].byteSize * size, addr.scope).toLongArray
+         Segment.ofAddress(addr, layoutOf[Long].byteSize * size, Scope.globalScope).toLongArray
 
    extension (a: Ptr[Float])
       def mkArray(size: Int) =
          val addr = a.asMemoryAddress
-         addr
-            .asSegment(layoutOf[Float].byteSize * size, addr.scope)
-            .toFloatArray
+         Segment.ofAddress(addr, layoutOf[Float].byteSize * size, Scope.globalScope).toFloatArray
 
    extension (a: Ptr[Double])
       def mkArray(size: Int) =
          val addr = a.asMemoryAddress
-         addr
-            .asSegment(layoutOf[Double].byteSize * size, addr.scope)
-            .toDoubleArray
+         Segment.ofAddress(addr, layoutOf[Double].byteSize * size, Scope.globalScope).toDoubleArray
 
    extension [A](a: Ptr[A])
       /** Enables partial dereferencing of a Pointer to a Struct type
@@ -294,27 +267,18 @@ object Ptr:
    given [A]: Emigrator[Ptr[A]] with
       def apply(a: Ptr[A]): Allocatee[Any] = a.asMemoryAddress
 
-   given [A]: Immigrator[Ptr[A]] = a => Ptr[A](a.asInstanceOf[MemoryAddress], 0)
+   given [A]: Immigrator[Ptr[A]] = a => Ptr[A](a.asInstanceOf[Address], 0)
 
    given [A, P <: Ptr[A]](using NativeInfo[A]): Reader[P] with
       def from(
-          memoryAddress: MemoryAddress,
+          memoryAddress: Address,
           offset: Long
       ): P =
-         val address = MemoryAccess.getAddressAtOffset(
-           MemorySegment.globalNativeSegment,
-           memoryAddress.toRawLongValue + offset
-         )
-
-         Ptr[A](address, 0).asInstanceOf[P]
+         Ptr[A](memoryAddress.address.getAddress(offset), 0).asInstanceOf[P]
 
    private val ptrSerializer = new Writer[Ptr[Any]]:
-      def into(ptr: Ptr[Any], memoryAddress: MemoryAddress, offset: Long) =
-         MemoryAccess.setAddressAtOffset(
-           MemorySegment.globalNativeSegment,
-           memoryAddress.toRawLongValue + offset,
-           ptr.asMemoryAddress
-         )
+      def into(ptr: Ptr[Any], memoryAddress: Address, offset: Long) =
+         memoryAddress.setAddress(offset, ptr.asMemoryAddress)
 
    given [A]: Writer[Ptr[A]] =
       ptrSerializer.asInstanceOf[Writer[Ptr[A]]]

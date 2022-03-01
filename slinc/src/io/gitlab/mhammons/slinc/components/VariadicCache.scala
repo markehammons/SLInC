@@ -1,9 +1,10 @@
 package io.gitlab.mhammons.slinc.components
 
 import scala.quoted.*
-import jdk.incubator.foreign.{SymbolLookup, MemoryAddress}
+import ffi.ForeignSymbol
+import scala.util.chaining.*
 
-class VariadicCache[R](address: MemoryAddress):
+class VariadicCache[R](address: ForeignSymbol):
    val cache: ThreadLocal[LRU] = ThreadLocal.withInitial(() => new LRU(10))
 
    transparent inline def apply(inline args: Any*) = ${
@@ -12,7 +13,7 @@ class VariadicCache[R](address: MemoryAddress):
 
 object VariadicCache:
    def applyImpl[R](
-       address: Expr[MemoryAddress],
+       address: Expr[ForeignSymbol],
        cache: Expr[LRU],
        argsExpr: Expr[Seq[Any]]
    )(using

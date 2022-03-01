@@ -2,7 +2,7 @@ package io.gitlab.mhammons.slinc.components
 
 import scala.quoted.*
 import scala.util.chaining.*
-import jdk.incubator.foreign.{SymbolLookup, MemoryAddress}
+import ffi.*
 import cats.data.Validated
 
 class Cache(storage: Array[Any]):
@@ -10,7 +10,7 @@ class Cache(storage: Array[Any]):
 
 object Cache:
    transparent inline def apply[A, S, RC](
-       symbolLookup: SymbolLookup
+       symbolLookup: Lookup
    ): Cache = ${
       cacheImpl[A, S, RC]('symbolLookup)
    }
@@ -45,11 +45,11 @@ object Cache:
    else name.flatMap(c => if c.isUpper then s"_${c.toLower}" else c.toString)
 
    private def getAddress(using q: Quotes)(
-       lookup: Expr[SymbolLookup],
+       lookup: Expr[Lookup],
        prefix: String,
        raw: Boolean,
        s: q.reflect.Symbol
-   ): Expr[MemoryAddress] =
+   ): Expr[ForeignSymbol] =
       val cleanedPrefix =
          prefix
             .filter(_ != '"')
@@ -59,14 +59,13 @@ object Cache:
       '{
          val nm = ${ name }
          $lookup
-            .lookup(nm)
-            .orElseThrow(() =>
+            .lookup(nm).getOrElse(
                throw new Exception(s"Could not find $nm to bind to.")
             )
       }
 
    private def cacheImpl[A, S, RC](
-       symbExpr: Expr[SymbolLookup]
+       symbExpr: Expr[Lookup]
    )(using q: Quotes, t: Type[A], s: Type[S], rc: Type[RC]) =
       import quotes.reflect.*
 

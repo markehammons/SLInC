@@ -1,6 +1,5 @@
 package io.gitlab.mhammons.slinc.components
 
-import jdk.incubator.foreign.{CLinker, SegmentAllocator}
 import scala.annotation.targetName
 
 type Emigratee[A, B] = Emigrator[A] ?=> B

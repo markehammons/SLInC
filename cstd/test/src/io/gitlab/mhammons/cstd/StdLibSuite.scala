@@ -53,7 +53,7 @@ class StdLibSuite extends munit.FunSuite:
    }
 
    test("qsort") {
-      val base = Array.fill(8)(Random.nextInt.toLong)
+      val base = Array.fill(30)(Random.nextInt.toLong)
 
       val sortedBase = scope {
          val copy = base.encode.castTo[Any]

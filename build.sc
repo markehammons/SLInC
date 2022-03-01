@@ -25,8 +25,9 @@ object slinc
 
    def moduleDeps = Seq(polymorphics)
    def ivyDeps = Agg(
-     ivy"org.typelevel::cats-core:2.7.0"
-   )
+     ivy"org.typelevel::cats-core:2.7.0",
+     ivy"io.gitlab.mhammons::ffi-j17:0.1.1",
+     ivy"io.gitlab.mhammons::ffi-j18:0.1.1")
    def scalaVersion = "3.1.1"
    def pomSettings = pomTemplate("SLinC - Scala <-> C Interop")
 
@@ -35,8 +36,7 @@ object slinc
      "-Wunused:all",
      "-unchecked",
      "-Xcheck-macros",
-     "-Xprint-suspension",
-     "-Xsemanticdb"
+     "-Xprint-suspension"
    )
 
    def scalaDocOptions = T {
@@ -64,7 +64,8 @@ object slinc
         "-unchecked",
         "-Xcheck-macros",
         "-Xprint-suspension",
-        "-Xsemanticdb"
+        "-Xsemanticdb",
+        "-Ydump-sbt-inc"
       )
 
       def forkArgs = Seq(
@@ -113,6 +114,19 @@ object slinc
    object bench extends Benchmarks {
       def jmhVersion = "1.33"
    }
+}
+
+object `slinc-ffi` extends ScalaModule {
+   def scalaVersion = "3.1.1"
+   override def sources = {
+      System.getProperty("java.version") match {
+         case s"17$x" => T.sources{millSourcePath / "src-17"}
+      }
+   }
+}
+
+object `slinc-ffi-api` extends ScalaModule {
+   def scalaVersion = "3.1.1"
 }
 
 object cstd extends ScalaModule with benchmark.BenchmarksModule {
@@ -171,6 +185,8 @@ object openblas extends ScalaModule with benchmark.BenchmarksModule {
 }
 
 object polymorphics extends ScalaModule with publishable.PublishableModule {
+   def publishVersion = "0.1.1"
+   def mimaPreviousVersions = Seq("0.1.1")
    def scalaVersion = "2.13.7"
    def pomSettings = pomTemplate(
      "Shim to use polymorphic methods from scala 3 <DON'T DEPEND ON ME>"
